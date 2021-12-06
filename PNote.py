@@ -17,18 +17,18 @@ def positional_embedding(maxlen, model_size):
                 PE[i, j] = np.cos(i / 10000 ** ((j-1) / model_size))
     PE = tf.constant(PE, dtype=tf.float32)
     return PE
-
+# 卷积层(替代word embedding机制)
 def conv_model(input_seq):
     inputs = input_seq
-    conv1 = layers.Conv1D(filters=32,kernel_size=12,strides=1,name="ConVLayers1")(inputs)
-    conv2 = layers.Conv1D(filters=32,kernel_size=8,strides=1,name="ConVLayers2")(inputs)
-    conv3 = layers.Conv1D(filters=64,kernel_size=4,strides=1,name="ConVLayers3")(inputs)
-    word1 = layers.MaxPooling1D(pool_size=5,name="MP1D1")(conv1)
-    word2 = layers.MaxPooling1D(pool_size=9,name="MP1D2")(conv2)
-    word3 = layers.MaxPooling1D(pool_size=13,name="MP1D3")(conv3)
+    conv1 = layers.Conv1D(filters=32,kernel_size=12,strides=1,name="ConVLayers1",padding="same")(inputs)
+    conv2 = layers.Conv1D(filters=32,kernel_size=8,strides=1,name="ConVLayers2",padding="same")(inputs)
+    conv3 = layers.Conv1D(filters=64,kernel_size=4,strides=1,name="ConVLayers3",padding="same")(inputs)
+    word1 = layers.MaxPooling1D(name="MP1D1",padding="same")(conv1)
+    word2 = layers.MaxPooling1D(name="MP1D2",padding="same")(conv2)
+    word3 = layers.MaxPooling1D(name="MP1D3",padding="same")(conv3)
     word = layers.Concatenate()([word1,word2,word3])
     return word
-#%%
+
 def transformer(query,key,value,i):
     # Multi headed self-attention
     attention_output = layers.MultiHeadAttention(
@@ -61,7 +61,7 @@ def transformer(query,key,value,i):
         epsilon=1e-6, name="encoder_{}_FFNNorm".format(i)
     )(a_ffn_output)
     return sequence_output
-#%%
+
 loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(
     reduction=tf.keras.losses.Reduction.NONE
 )
@@ -102,7 +102,7 @@ class PNotePreModel(tf.keras.Model):
         return [loss_tracker]
 
 def create_PNotePreModel():
-    inputs = layers.Input((16,20),name='Input')
+    inputs = layers.Input((None,23),name='Input')
     encoder_output = conv_model(inputs)
     for i in range(1):
         encoder_output = transformer(encoder_output, encoder_output, encoder_output, i)
@@ -115,6 +115,46 @@ def create_PNotePreModel():
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.005)
     mlm_model.compile(optimizer=optimizer)
     return mlm_model
+#
+# transformer_model =  create_PNotePreModel()
+# plot_model(transformer_model,to_file="model.png", show_shapes=True, show_layer_names=True, dpi=128,rankdir='TB')
 
-transformer_model =  create_PNotePreModel()
-plot_model(transformer_model,to_file="model.png", show_shapes=True, show_layer_names=True, dpi=128,rankdir='TB')
+def seq2coding(seq):
+    aa_vacbo = "ACDEFGHIKLMNPQRSTUVWY><"
+    aa2code = {}
+    for i in range(23):
+        aa2code[aa_vacbo[i]] = [0 for _ in range(23)]
+        aa2code[aa_vacbo[i]][i] = 1
+    coding = []
+    for aa in seq:
+        coding += [aa2code[aa]]
+    return np.array(coding)
+
+def feature2coding(fseq):
+    feature2code = {'S':[1,0,0,0,0],'T':[0,1,0,0,0],'N':[0,0,1,0,0],'>':[0,0,0,1,0],'<':[0,0,0,0,1]}
+    coding = []
+    for f in fseq:
+        coding += [feature2code[f]]
+    return np.array(coding)
+
+trainset = open('./testdatabase/trainset.txt','r')
+X_set = []
+Y_set = []
+line = trainset.readline()
+count = 1
+while line:
+    if count == 20:
+        break
+    seq,note = line.rstrip('\n').split('\t')
+    X_set.append(seq2coding('>'+seq+'<'))
+    Y_set.append(feature2coding('>'+note+'<'))
+    count += 1
+    line = trainset.readline()
+trainset.close()
+print('training')
+model = create_PNotePreModel()
+for i in range(10):
+    print(Y_set[i])
+    model.fit(np.array([X_set[i]]),np.array([Y_set[i]]))
+
+
